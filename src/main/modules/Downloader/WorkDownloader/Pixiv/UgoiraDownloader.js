@@ -3,7 +3,7 @@ import GeneralArtworkProvider from '@/modules/Downloader/Providers/Pixiv/General
 import Request from '@/modules/Request';
 import SettingStorage from '@/modules/SettingStorage';
 import TaskManager from '@/modules/TaskManager';
-import UgoiraConvertTask2 from '@/modules/Task/UgoiraConvertTask2';
+import UgoiraConvertTaskMp4 from '@/modules/Task/UgoiraConvertTaskMp4';
 import UgoiraProvider from '@/modules/Downloader/Providers/Pixiv/UgoiraProvider';
 import WorkDownloader from '@/modules/Downloader/WorkDownloader';
 import WorkDownloaderUnstoppableError from '../../WorkDownloaderUnstoppableError';
@@ -161,10 +161,16 @@ class UgoiraDownloader extends WorkDownloader {
 
     debug.sendStatus(`Packing frames information to ${this.id}`);
 
+    let inputs = "";
+    this.meta.frames.forEach((item, i) => {
+      inputs += `file ${item.file}\nduration ${item.delay}ms\n`
+    });
+
     fs.readFile(file).then(data => {
       return Zip.loadAsync(data);
     }).then(zip => {
       zip.file('animation.json', JSON.stringify(this.meta.frames));
+      zip.file('inputs.txt', inputs);
 
       zip.generateNodeStream({
         type: 'nodebuffer',
@@ -181,13 +187,13 @@ class UgoiraDownloader extends WorkDownloader {
             //   file: file,
             //   saveFile: path.join(this.saveFolder, this.saveFilename) + '.gif'
             // });
-            TaskManager.getDefault().addTaskPayload(UgoiraConvertTask2.name, {
+            TaskManager.getDefault().addTaskPayload(UgoiraConvertTaskMp4.name, {
               file,
-              saveFile: path.join(this.saveFolder, this.saveFilename) + '.gif'
+              saveFile: path.join(this.saveFolder, this.saveFilename) + '.mp4'
             });
-            this.setFinish('Download complete, GIF generation task has send to task');
+            this.setFinish('Download complete, MP4 generation task has send to task');
           } else {
-            this.setFinish('Download complete, GIF generate skipped');
+            this.setFinish('Download complete, MP4 generate skipped');
           }
         });
     }).catch(error => {
