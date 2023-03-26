@@ -3,6 +3,9 @@ import GeneralArtworkProvider from '@/modules/Downloader/Providers/Pixiv/General
 import Request from '@/modules/Request';
 import SettingStorage from '@/modules/SettingStorage';
 import WorkDownloader from '@/modules/Downloader/WorkDownloader';
+import JSZip from 'jszip';
+import fs from 'fs-extra';
+import path from 'path';
 
 /**
  * @class
@@ -67,6 +70,8 @@ class MangaDownloader extends WorkDownloader {
      * @type {number}
      */
     this.downloadTotalEscapedTime = 0;
+
+    this.zip = null;
   }
 
   /**
@@ -183,7 +188,9 @@ class MangaDownloader extends WorkDownloader {
      */
     this.context.pageNum = this.imageIndex;
 
-    this.makeSaveOption();
+
+    //this.makeSaveOption();
+    this.makeSaveOptionFromRenameTemplate("%user_id%/%id%_p%page_num%");
 
     let downloadOptions = Object.assign(
       {},
@@ -195,55 +202,103 @@ class MangaDownloader extends WorkDownloader {
       }
     );
 
-    this.download = new Download(downloadOptions);
+    let regex = url.match(/\.([a-z]+)(?:\?.*)?$/);
+    let ext = "";
+    if (regex) {
+      ext = regex[1];
+    }
 
-    this.download.on('dl-finish', ({ file }) => {
+    this.progress = this.imageIndex / this.images.length;
+
+
+    if (this.images.length > 1) {
+      let filename = path.join(this.saveFolder, `${this.provider.context.id}.cbz`);
       if (!this.savedTarget) {
-        this.savedTarget = file;
+        this.savedTarget = filename;
       }
 
-      this.imageIndex++;
+      if (fs.pathExistsSync(filename)) {
+        this.setFinish();
+        this.zip = null;
+        return;
+      }
+      let request = new Request(downloadOptions);
+      request.on('response', r => {
+        let buf = [];
+        r.on('data', data => {
+          buf.push(data);
+          this.downloadTotalCompletedDataSize += data.length;
+        });
+        r.on('end', () => {
+          this.zip.file(`${this.saveFilename}.${ext}`, Buffer.concat(buf));
 
-      this.progress = this.imageIndex / this.images.length;
-      this.downloadTotalCompletedDataSize += this.download.totalDataSize;
-      this.downloadTotalEscapedTime += this.download.escapedTime;
+          this.imageIndex++;
+          this.progress = this.imageIndex / this.images.length;
+          this.setDownloading(`${this.imageIndex} / ${this.images.length}`);
+          if (this.imageIndex > (this.images.length - 1)) {
+            fs.ensureFileSync(filename);
+            this.zip.generateNodeStream({type:'nodebuffer',streamFiles:true})
+            .pipe(fs.createWriteStream(filename));
+            this.setFinish();
+            this.zip = null;
+          } else {
+            if (!(this.isStop() || this.isStopping())) {
+              this.downloadImages();
+            }
+          }
+        });
+        r.on('error', error => {
+          this.setError(error);
+        });
+      });
+      request.end();
+    } else {
 
-      this.setDownloading(`${this.imageIndex} / ${this.images.length}`);
+      this.download = new Download(downloadOptions);
 
-      if (this.imageIndex > (this.images.length - 1)) {
+      this.download.on('dl-finish', ({ file }) => {
+        if (!this.savedTarget) {
+          this.savedTarget = file;
+        }
+        this.imageIndex++;
+        this.progress = this.imageIndex / this.images.length;
+        this.downloadTotalCompletedDataSize += this.download.totalDataSize;
+        this.downloadTotalEscapedTime += this.download.escapedTime;
+
+        this.setDownloading(`${this.imageIndex} / ${this.images.length}`);
+
         this.setFinish();
         this.download = null;
-      } else {
-        if (!(this.isStop() || this.isStopping())) {
-          this.downloadImages();
-        }
-      }
-    });
+      });
 
-    this.download.on('dl-progress', () => {
-      this.downloadCompletedDataSize = this.downloadTotalCompletedDataSize + this.download.completedDataSize;
-      this.downloadEscapedTime = this.downloadTotalEscapedTime + this.download.escapedTime;
-      this.progress = this.download.progress / this.images.length + this.imageIndex / this.images.length;
-      this.setDownloading(`${this.imageIndex} / ${this.images.length}`);
-    });
+      this.download.on('dl-progress', () => {
+        this.downloadCompletedDataSize = this.downloadTotalCompletedDataSize + this.download.completedDataSize;
+        this.downloadEscapedTime = this.downloadTotalEscapedTime + this.download.escapedTime;
+        this.progress = this.download.progress / this.images.length + this.imageIndex / this.images.length;
+        this.setDownloading(`${this.imageIndex} / ${this.images.length}`);
+      });
 
-    this.download.on('dl-error', error => {
-      this.setError(error);
-      this.download = null;
-    });
+      this.download.on('dl-error', error => {
+        console.log(error);
+        console.log(downloadOptions);
+        this.setError(error);
+        this.download = null;
+      });
 
-    this.download.on('dl-aborted', () => {
-      this.setStop();
-      this.download = null;
-    });
+      this.download.on('dl-aborted', () => {
+        this.setStop();
+        this.download = null;
+      });
 
-    this.download.download();
+      this.download.download();
+    }
   }
 
   reset() {
     super.reset();
     this.images = [];
     this.imageIndex = 0;
+    this.zip = null;
   }
 
   start() {
@@ -251,6 +306,7 @@ class MangaDownloader extends WorkDownloader {
 
     if (this.images.length === 0) {
       this.setDownloading('_fetch_images_in_the_artwork');
+      this.zip = new JSZip();
 
       this.requestPages().then(images => {
         this.images = images;
