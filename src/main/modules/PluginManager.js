@@ -16,7 +16,7 @@ import fs from 'fs-extra';
 import md5 from 'md5';
 import { parse } from 'node-html-parser';
 import path from 'path';
-import rimraf from 'rimraf';
+import { rimraf } from 'rimraf';
 import ScheduleTaskPool from '@/modules/ScheduleTaskPool';
 
 class PluginManager extends EventEmitter {
